@@ -1,0 +1,9 @@
+{
+  "run": {
+    "command": "nx serve chat",
+    "startTime": "2025-06-01T16:33:49.628Z",
+    "endTime": "2025-06-01T16:35:10.417Z",
+    "inner": false
+  },
+  "tasks": []
+}
