@@ -73,3 +73,7 @@ vitest.config.*.timestamp*
 # Temporary folders
 tmp/
 temp/
+
+# Evaluation reports
+evaluation-report.pdf
+*.pdf

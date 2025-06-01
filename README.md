@@ -1,7 +1,3 @@
-# Chat Application
-
-A chat application built with Nx, React, and Vite.
-
 ## Prerequisites
 
 Before you begin, ensure you have the following installed on your Mac:
@@ -73,3 +69,7 @@ To run the evaluation script (requires the chat app to be running), use:
 ```sh
 GEMINI_API_KEY='your-gemini-api-key-here' node evaluate.js
 ```
+
+## Evaluation Report
+
+The evaluation script generates a detailed PDF report saved as `evaluation-report.pdf` in the project root directory.

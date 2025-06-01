@@ -1,5 +1,8 @@
 const { chromium } = require('playwright');
 const { GoogleGenAI } = require('@google/genai');
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
 // Initialize Gemini AI with API key from environment variable
 const apiKey = process.env.GEMINI_API_KEY;
@@ -69,7 +72,7 @@ async function launchBrowser(message) {
         const context = await browser.newContext();
         const page = await context.newPage();
         
-        await page.goto('http://localhost:5000/hotels/search?entity_id=27544008&checkin=2024-11-05&checkout=2024-11-06&adults=2&rooms=1');
+        await page.goto('http://localhost:4200');
         
         console.log('Browser opened and navigated to the URL successfully!');
         
@@ -103,13 +106,28 @@ async function launchBrowser(message) {
         console.log('Looking for IMChatView__hotelRecommendations...');
         const replySelector = '.IMChatView__hotelRecommendations';
         
+        // Record start time for waiting for recommendations
+        const waitStartTime = Date.now();
+        
         // Wait for the specific hotel recommendations div to appear
         await page.waitForSelector(replySelector, { timeout: 15000 });
         const replyElement = await page.$(replySelector);
         
+        // Record end time and calculate wait duration
+        const waitEndTime = Date.now();
+        const waitTimeMs = waitEndTime - waitStartTime;
+        const waitTimeSeconds = (waitTimeMs / 1000).toFixed(2);
+        
+        console.log(`Hotel recommendations loaded in ${waitTimeSeconds} seconds`);
+        
+        let htmlContent = null;
         if (replyElement) {
-          const htmlContent = await replyElement.innerHTML();
-          
+          htmlContent = await replyElement.innerHTML();
+        }
+        
+        await browser.close();
+        
+        if (htmlContent) {
           console.log('Sending hotel recommendations to Gemini...');
           const contentForGemini = `Hotel Recommendations from Chat:
 
@@ -117,11 +135,27 @@ ${htmlContent}
 
 Please evaluate these hotel recommendations as a whole based on the original user request: "${message}"
 
+IMPORTANT INSTRUCTIONS:
+- ONLY extract the hotel names from the provided recommendations
+- IGNORE any ratings, prices, descriptions, or other information that may be present in the recommendations
+- Use ONLY your internet search capabilities to find all information about these hotels (location, amenities, prices, ratings, etc.)
+- Do NOT use any information from the recommendations except for the hotel names
+- Base your entire analysis on what you find through internet search about these specific hotels
+
+Note: The recommendations only provide hotel names without detailed information. Please use your internet search capabilities to look up these hotels and verify their actual details, amenities, and locations. Do NOT recommend adding more detailed information to the recommendations - instead, search for and use the information you find online to evaluate how well these specific hotels match the user's requirements.
+
 Analyze how well the overall set of recommendations matches the user's requirements and provide your response in the following JSON format:
 
 {
-  "summary": "A detailed explanation of how well the recommended hotels as a group align with the user's needs, including strengths and weaknesses of the recommendations and your reasoning for the overall evaluation",
-  "score": [single number from 1-10 where 10 means the set of recommendations perfectly matches the user's request and 1 means the recommendations are completely irrelevant]
+  "summary": "A detailed explanation of how well the recommended hotels as a group align with the user's needs, including strengths and weaknesses of the recommendations and your reasoning for the overall evaluation. Base your analysis on the actual hotel information you find through internet search.",
+  "individual_hotels": [
+    {
+      "hotel_name": "Name of the hotel",
+      "analysis": "Detailed analysis of how well this specific hotel matches the user's requirements based on internet search results",
+      "score": "Individual score from 1-10 for this hotel"
+    }
+  ],
+  "overall_score": "Single number from 1-10 where 10 means the set of recommendations perfectly matches the user's request and 1 means the recommendations are completely irrelevant"
 }
 
 `;
@@ -135,22 +169,141 @@ Analyze how well the overall set of recommendations matches the user's requireme
             return {
               message: message,
               summary: parsed.summary || geminiResponse,
-              score: parsed.score || 0
+              score: parsed.overall_score || parsed.score || 0,
+              individual_hotels: parsed.individual_hotels || [],
+              waitTimeSeconds: parseFloat(waitTimeSeconds)
             };
           } catch (error) {
             console.warn('Could not parse JSON response, using raw response:', error.message);
             return {
               message: message,
               summary: geminiResponse,
-              score: 0
+              score: 0,
+              individual_hotels: [],
+              waitTimeSeconds: parseFloat(waitTimeSeconds)
             };
           }
         } else {
-          throw new Error('Hotel recommendations element found but could not access it');
+          throw new Error('Hotel recommendations element found but could not access its content');
         }
+    } catch (error) {
+        console.error(`Error testing message "${message}":`, error);
+        return {
+            message: message,
+            summary: `Error: ${error.message}`,
+            score: 0,
+            individual_hotels: [],
+            waitTimeSeconds: 0
+        };
     } finally {
-        await browser.close();
+        // Always close browser, even if an error occurred
+        try {
+            await browser.close();
+        } catch (closeError) {
+            console.warn('Browser may have already been closed:', closeError.message);
+        }
     }
+}
+
+async function generatePDFReport(results, averageScore, averageWaitTime) {
+    console.log('\nGenerating PDF report...');
+    
+    // Create a new PDF document
+    const doc = new PDFDocument({ margin: 50 });
+    const reportPath = path.join(__dirname, 'evaluation-report.pdf');
+    
+    // Pipe the PDF to a file
+    doc.pipe(fs.createWriteStream(reportPath));
+    
+    // Add title
+    doc.fontSize(24)
+       .font('Helvetica-Bold')
+       .text('Hotel Chat Evaluation Report', { align: 'center' });
+    
+    // Add generation timestamp
+    doc.fontSize(12)
+       .font('Helvetica')
+       .text(`Generated on: ${new Date().toLocaleString()}`, { align: 'center' })
+       .moveDown(2);
+    
+    // Add summary section
+    doc.fontSize(18)
+       .font('Helvetica-Bold')
+       .text('Summary')
+       .moveDown(0.5);
+    
+    doc.fontSize(12)
+       .font('Helvetica')
+       .text(`Total Test Messages: ${results.length}`)
+       .text(`Average Score: ${averageScore.toFixed(2)}/10`)
+       .text(`Average Response Time: ${averageWaitTime} seconds`)
+       .moveDown(1);
+    
+    // Add individual test results
+    doc.fontSize(16)
+       .font('Helvetica-Bold')
+       .text('Test Results')
+       .moveDown(0.5);
+    
+    results.forEach((result, index) => {
+        // Check if we need a new page
+        if (doc.y > 700) {
+            doc.addPage();
+        }
+        
+        doc.fontSize(14)
+           .font('Helvetica-Bold')
+           .text(`Test ${index + 1}: "${result.message}"`)
+           .moveDown(0.3);
+        
+        doc.fontSize(12)
+           .font('Helvetica')
+           .text(`Score: ${result.score}/10`)
+           .text(`Response Time: ${result.waitTimeSeconds} seconds`)
+           .moveDown(0.3);
+        
+        doc.font('Helvetica-Bold')
+           .text('Summary:')
+           .font('Helvetica')
+           .text(result.summary, { 
+               width: 500,
+               lineGap: 2
+           })
+           .moveDown(1);
+        
+        // Add individual hotel analysis if available
+        if (result.individual_hotels && result.individual_hotels.length > 0) {
+            doc.font('Helvetica-Bold')
+               .text('Individual Hotel Analysis:')
+               .moveDown(0.3);
+            
+            result.individual_hotels.forEach((hotel, hotelIndex) => {
+                // Check if we need a new page
+                if (doc.y > 680) {
+                    doc.addPage();
+                }
+                
+                doc.fontSize(11)
+                   .font('Helvetica-Bold')
+                   .text(`${hotelIndex + 1}. ${hotel.hotel_name} - Score: ${hotel.score}/10`)
+                   .font('Helvetica')
+                   .text(hotel.analysis, { 
+                       width: 500,
+                       lineGap: 1,
+                       indent: 20
+                   })
+                   .moveDown(0.5);
+            });
+            
+            doc.moveDown(0.5);
+        }
+    });
+    
+    // Finalize the PDF
+    doc.end();
+    
+    console.log(`PDF report generated: ${reportPath}`);
+    return reportPath;
 }
 
 async function evaluate() {
@@ -164,6 +317,7 @@ async function evaluate() {
     
     const results = [];
     let totalScore = 0;
+    let totalWaitTime = 0;
     
     console.log('Starting evaluation with multiple test messages...\n');
     
@@ -172,28 +326,28 @@ async function evaluate() {
             const result = await launchBrowser(message);
             results.push(result);
             totalScore += result.score;
+            totalWaitTime += result.waitTimeSeconds;
         } catch (error) {
             console.error(`Error testing message "${message}":`, error);
             results.push({
                 message: message,
                 summary: `Error: ${error.message}`,
-                score: 0
+                score: 0,
+                individual_hotels: [],
+                waitTimeSeconds: 0
             });
         }
     }
     
     const averageScore = totalScore / testMessages.length;
+    const averageWaitTime = (totalWaitTime / testMessages.length).toFixed(2);
     
-    console.log('\n=== FINAL EVALUATION RESULTS ===');
-    console.log('\nIndividual results:');
-    
-    results.forEach((result, index) => {
-        console.log(`${index + 1}. "${result.message}" - Score: ${result.score}/10`);
-        console.log(`   Summary: ${result.summary}`);
-    });
-    
-    console.log(`Total messages tested: ${testMessages.length}`);
-    console.log(`Average score: ${averageScore.toFixed(2)}/10`);
+    // Generate PDF report
+    try {
+        await generatePDFReport(results, averageScore, averageWaitTime);
+    } catch (error) {
+        console.error('Error generating PDF report:', error);
+    }
 }
 
 evaluate();
