@@ -67,7 +67,7 @@ The application will be available at http://localhost:4200
 To run the evaluation script (requires the chat app to be running), use:
 
 ```sh
-GEMINI_API_KEY='your-gemini-api-key-here' node evaluate.js
+GEMINI_API_KEY='your-gemini-api-key-here' node evaluate.js --city "Tokyo"
 ```
 
 ## Evaluation Report

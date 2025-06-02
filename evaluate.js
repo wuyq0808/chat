@@ -4,6 +4,19 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
+// Parse command line arguments
+const args = process.argv.slice(2);
+const cityIndex = args.findIndex(arg => arg === '--city');
+const city = cityIndex !== -1 && args[cityIndex + 1] ? args[cityIndex + 1] : null;
+
+if (!city) {
+  console.error('Error: --city parameter is required');
+  console.error('Usage: node evaluate.js --city "CityName"');
+  process.exit(1);
+}
+
+console.log(`Running evaluation for city: ${city}`);
+
 // Initialize Gemini AI with API key from environment variable
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
@@ -43,24 +56,40 @@ function extractJsonFromResponse(response) {
   }
 }
 
-async function sendToGemini(content) {
-  try {
-    console.log('Sending content to Gemini...');
-    
-    // Generate content using the new API format with grounding
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: [content],
-      config: {
-        tools: [{googleSearch: {}}],
-      },
-    });
-    
-    return response.text;
-  } catch (error) {
-    console.error('Error sending to Gemini:', error);
-    throw error;
+async function sendToGemini(content, maxRetries = 3) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Sending content to Gemini (attempt ${attempt}/${maxRetries})...`);
+      
+      // Generate content using the new API format with grounding
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: [content],
+        config: {
+          tools: [{googleSearch: {}}],
+        },
+      });
+      
+      return response.text;
+    } catch (error) {
+      lastError = error;
+      console.error(`Error sending to Gemini (attempt ${attempt}/${maxRetries}):`, error.message);
+      
+      if (attempt === maxRetries) {
+        console.error('All retry attempts failed');
+        throw error;
+      }
+      
+      // Exponential backoff: wait 2^attempt seconds before retrying
+      const delayMs = Math.pow(2, attempt) * 1000;
+      console.log(`Retrying in ${delayMs / 1000} seconds...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
   }
+  
+  throw lastError;
 }
 
 async function launchBrowser(message) {
@@ -88,44 +117,69 @@ async function launchBrowser(message) {
         const chatInput = await page.waitForSelector('input.IMChatView__input[placeholder="Type your message..."]', { timeout: 10000 });
         console.log('Found chat input!');
         
-        // Type a message
-        await chatInput.fill(message);
-        console.log(`Typed message: "${message}"`);
+        const connectionErrorText = "I'm sorry, I'm having trouble connecting right now. Please try again in a moment.";
+        let replyElement = null;
+        let waitTimeMs = 0;
+        const maxAttempts = 3;
         
-        // Press Enter to send the message
-        await chatInput.press('Enter');
-        console.log('Message sent!');
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            console.log(`Attempt ${attempt}/${maxAttempts}: Typing and sending message...`);
+            
+            // Clear the input and type the message
+            await chatInput.fill('');
+            await chatInput.fill(message);
+            console.log(`Typed message: "${message}"`);
+            
+            // Press Enter to send the message
+            await chatInput.press('Enter');
+            console.log('Message sent!');
+            
+            // Wait for and capture the reply
+            console.log('Waiting for chat reply...');
+            console.log('Looking for IMChatView__hotelRecommendations or connection error...');
+            
+            // Record start time for waiting for recommendations
+            const waitStartTime = Date.now();
+            
+            try {
+                // Wait for either hotel recommendations OR connection error message
+                const foundElement = await Promise.race([
+                    page.waitForSelector('.IMChatView__hotelRecommendations', { timeout: 30000 }),
+                    page.waitForSelector(`text="${connectionErrorText}"`, { timeout: 30000 })
+                ]);
+                
+                // Record end time and calculate wait duration
+                const waitEndTime = Date.now();
+                waitTimeMs = waitEndTime - waitStartTime;
+                
+                // Check if we got the connection error message by checking the element's text content
+                const elementText = await foundElement.textContent();
+                
+                if (elementText && elementText.includes(connectionErrorText)) {
+                    console.log(`Connection error detected on attempt ${attempt}. Retrying immediately...`);
+                    continue; // Skip to next attempt immediately
+                }
+                
+                // If we reach here, we got the hotel recommendations
+                replyElement = foundElement;
+                console.log(`Hotel recommendations found on attempt ${attempt}!`);
+                break;
+            } catch (error) {
+                console.log(`Attempt ${attempt} failed: No response found within timeout`);
+                if (attempt === maxAttempts) {
+                    throw new Error(`No valid response found after ${maxAttempts} attempts`);
+                }
+                console.log('Retrying...');
+            }
+        }
         
-        // Wait a moment to see the response
-        await page.waitForTimeout(3000);
-        
-        // Wait for and capture the reply
-        console.log('Waiting for chat reply...');
-        
-        // Wait specifically for the hotel recommendations div
-        console.log('Looking for IMChatView__hotelRecommendations...');
-        const replySelector = '.IMChatView__hotelRecommendations';
-        
-        // Record start time for waiting for recommendations
-        const waitStartTime = Date.now();
-        
-        // Wait for the specific hotel recommendations div to appear
-        await page.waitForSelector(replySelector, { timeout: 15000 });
-        const replyElement = await page.$(replySelector);
-        
-        // Record end time and calculate wait duration
-        const waitEndTime = Date.now();
-        const waitTimeMs = waitEndTime - waitStartTime;
         const waitTimeSeconds = (waitTimeMs / 1000).toFixed(2);
-        
         console.log(`Hotel recommendations loaded in ${waitTimeSeconds} seconds`);
         
         let htmlContent = null;
         if (replyElement) {
           htmlContent = await replyElement.innerHTML();
         }
-        
-        await browser.close();
         
         if (htmlContent) {
           console.log('Sending hotel recommendations to Gemini...');
@@ -169,7 +223,7 @@ Analyze how well the overall set of recommendations matches the user's requireme
             return {
               message: message,
               summary: parsed.summary || geminiResponse,
-              score: parsed.overall_score || parsed.score || 0,
+              score: parseFloat(parsed.overall_score || 0),
               individual_hotels: parsed.individual_hotels || [],
               waitTimeSeconds: parseFloat(waitTimeSeconds)
             };
@@ -308,18 +362,18 @@ async function generatePDFReport(results, averageScore, averageWaitTime) {
 
 async function evaluate() {
     const testMessages = [
-        "I need to stay near the sea in Shenzhen",
-        "Looking for luxury hotels with swimming pool in Shenzhen",
-        "Budget accommodation near business district in Shenzhen",
-        "Family-friendly hotel with kids activities in Shenzhen",
-        "Stay near the train station in Shenzhen"
+        `I need to stay near the sea in ${city}`,
+        `Looking for luxury hotels with swimming pool in ${city}`,
+        `Budget accommodation near business district in ${city}`,
+        `Family-friendly hotel with kids activities in ${city}`,
+        `Stay near the airport in ${city}`
     ];
     
     const results = [];
     let totalScore = 0;
     let totalWaitTime = 0;
     
-    console.log('Starting evaluation with multiple test messages...\n');
+    console.log(`Starting evaluation with multiple test messages for ${city}...\n`);
     
     for (const message of testMessages) {
         try {
