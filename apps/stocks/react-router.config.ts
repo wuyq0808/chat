@@ -1,11 +1,16 @@
 import type { Config } from "@react-router/dev/config";
+import "react-router";
+
+declare module "react-router" {
+  interface Future {
+    unstable_middleware: true;
+  }
+}
 
 export default {
   ssr: true,
   appDirectory: "app",
   future: {
-    v3_fetcherPersist: true,
-    v3_relativeSplatPath: true,
-    v3_throwAbortReason: true,
+    unstable_middleware: true,
   },
 } satisfies Config;
