@@ -3,11 +3,11 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { getCachedArticle } from "../services/cacheService";
 import { triggerBackgroundRefresh } from "../services/backgroundRefresh";
 import { format } from "date-fns";
+import ReactMarkdown from "react-markdown";
 
 interface LoaderData {
   symbol: string;
   article: string | null;
-  stockInfo: any;
   lastUpdated?: string;
 }
 
@@ -16,7 +16,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     return [{ title: "Stock Not Found" }];
   }
   return [
-    { title: `${data.symbol} Stock Analysis` },
+    { title: data.symbol },
     { name: "description", content: `Investment analysis and insights for ${data.symbol} stock` },
   ];
 };
@@ -40,7 +40,6 @@ export async function loader({ params }: LoaderFunctionArgs): Promise<LoaderData
     return {
       symbol,
       article: cached.content,
-      stockInfo: cached.stockInfo,
       lastUpdated: format(new Date(cached.timestamp), 'yyyy/MM/dd HH:mm:ss'),
     };
   }
@@ -52,7 +51,6 @@ export async function loader({ params }: LoaderFunctionArgs): Promise<LoaderData
   return {
     symbol,
     article: null,
-    stockInfo: null,
   };
 }
 
@@ -62,7 +60,7 @@ export default function StockPage() {
   if (!data || !data.article) {
     return (
       <div style={{ fontFamily: "Inter, system-ui, Avenir, Helvetica, Arial, sans-serif", padding: "2rem" }}>
-        <h1>{data?.symbol} Stock Analysis</h1>
+        <h1>{data?.symbol}</h1>
         <div style={{ 
           backgroundColor: "#f0f8ff", 
           border: "1px solid #0066cc", 
@@ -77,7 +75,7 @@ export default function StockPage() {
           </p>
         </div>
         <Link to="/" style={{ color: "#0066cc", textDecoration: "none" }}>
-          ← Back to Stock List
+          ← Back to List
         </Link>
       </div>
     );
@@ -86,61 +84,26 @@ export default function StockPage() {
   return (
     <div style={{ fontFamily: "Inter, system-ui, Avenir, Helvetica, Arial, sans-serif", padding: "2rem", maxWidth: "800px", margin: "0 auto" }}>
       <Link to="/" style={{ color: "#0066cc", textDecoration: "none", marginBottom: "1rem", display: "inline-block" }}>
-        ← Back to Stock List
+        ← Back to List
       </Link>
       
-      <h1>{data.symbol} Stock Analysis</h1>
+      <h1>{data.symbol}</h1>
       
-      {data.lastUpdated && (
-        <div style={{ 
-          backgroundColor: "#f5f5f5", 
-          padding: "0.75rem 1rem", 
-          borderRadius: "6px", 
-          marginBottom: "1rem",
-          fontSize: "0.9rem",
-          color: "#666"
-        }}>
-          <strong>Last Updated:</strong> {data.lastUpdated}
-        </div>
-      )}
-      
-      {data.stockInfo && (
-        <div style={{ 
-          backgroundColor: "#f5f5f5", 
-          padding: "1rem", 
-          borderRadius: "8px", 
-          marginBottom: "2rem" 
-        }}>
-          <h3 style={{ marginTop: 0 }}>Current Market Data</h3>
-          <pre style={{ margin: 0 }}>{JSON.stringify(data.stockInfo, null, 2)}</pre>
-        </div>
-      )}
+      <div style={{ 
+        backgroundColor: "#f5f5f5", 
+        padding: "0.75rem 1rem", 
+        borderRadius: "6px", 
+        marginBottom: "1rem",
+        fontSize: "0.9rem",
+        color: "#666"
+      }}>
+        <strong>Last Updated:</strong> {data.lastUpdated || 'No timestamp available'}
+      </div>
       
       <article style={{ lineHeight: 1.6 }}>
-        <div dangerouslySetInnerHTML={{ __html: formatArticle(data.article) }} />
+        <ReactMarkdown>{data.article}</ReactMarkdown>
       </article>
     </div>
   );
 }
 
-function formatArticle(content: string): string {
-  // Convert markdown-style formatting to HTML
-  return content
-    .split('\n')
-    .map(line => {
-      // Convert headers
-      if (line.startsWith('### ')) return `<h3>${line.substring(4)}</h3>`;
-      if (line.startsWith('## ')) return `<h2>${line.substring(3)}</h2>`;
-      if (line.startsWith('# ')) return `<h1>${line.substring(2)}</h1>`;
-      
-      // Convert bold text
-      line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      
-      // Convert line breaks
-      if (line.trim() === '') return '<br />';
-      
-      // Default to paragraph
-      return `<p>${line}</p>`;
-    })
-    .join('\n');
-}

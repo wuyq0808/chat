@@ -1,4 +1,4 @@
-import { generateStockArticle, getStockInfo } from './geminiService';
+import { generateStockArticle } from './geminiService';
 import { setCachedArticle } from './cacheService';
 import { Mutex } from 'async-mutex';
 
@@ -39,13 +39,10 @@ export async function triggerBackgroundRefresh(symbol: string) {
 
 async function refreshStockContent(symbol: string) {
   try {
-    const [article, stockInfo] = await Promise.all([
-      generateStockArticle(symbol),
-      getStockInfo(symbol)
-    ]);
+    const article = await generateStockArticle(symbol);
 
     if (article) {
-      await setCachedArticle(symbol, article, stockInfo);
+      await setCachedArticle(symbol, article, null);
       console.log(`📄 Fresh content cached for ${symbol}`);
     } else {
       console.log(`⚠️ Failed to generate article for ${symbol}`);
