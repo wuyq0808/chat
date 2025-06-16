@@ -7,7 +7,8 @@ Server-side rendered React stocks application using React Router 7's native SSR 
 - **Framework**: React with React Router 7 (Remix merged)
 - **Routing**: React Router 7 with native SSR and data loading
 - **Port**: 3000 (React Router 7 dev server)
-- **Data Source**: Google Gemini API called via route loaders
+- **Data Source**: Google Gemini API (triggered by expired cache visits)
+- **Content Refresh**: Background refresh triggered on expired cache access
 - **Build**: React Router 7 production build with SSR
 
 ## Routes (React Router 7)
@@ -20,7 +21,7 @@ Server-side rendered React stocks application using React Router 7's native SSR 
 
 ### /stock/:symbol (Stock Article Route)
 - **Component**: StockPage
-- **Loader**: Fetches article data from cache or Gemini API
+- **Loader**: Fetches article data from cache only
 - **Purpose**: Displays individual stock article
 - **Data**: Retrieved via useLoaderData() hook
 - **Features**: Article content (if available), stock info, back to home navigation
@@ -92,7 +93,6 @@ apps/
 - react-router: React Router 7 core
 - typescript: Type checking
 - @google/genai: Gemini API client (v2)
-- dotenv: Environment variable management
 
 ## Scripts
 - `npm run dev`: React Router 7 development server with SSR
@@ -117,13 +117,14 @@ apps/
 - **Implementation**: Custom file-based cache service
 - **Cache Location**: `.cache/articles/` directory
 - **Cache Key**: Stock symbol (e.g., `AAPL.json`)
-- **Cache Duration**: Configurable (e.g., 24 hours)
+- **Cache Duration**: 10 minutes
 - **Cache Flow in Route Loaders**:
   1. Loader checks if cached article exists for symbol
-  2. If exists and not expired, return cached data
-  3. If not exists or expired, fetch from Gemini API
-  4. Cache the new response
-  5. If API fails and no cache, return null
+  2. If exists and not expired (< 10 minutes), return cached data
+  3. If exists but expired (> 10 minutes), return old cached data AND trigger background refresh
+  4. If not exists, return null and show empty state
+  5. Never call API synchronously from route loaders
+- **Content Generation**: Background refresh triggered when expired content is accessed
 
 ## Gemini Integration (v2)
 - **API Key**: Stored in environment variables
@@ -143,17 +144,29 @@ apps/
   const content = response.text;
   ```
 - **React Router 7 Integration**:
-  - Called in route loader functions
-  - Check cache before API call
+  - Route loaders read from cache and trigger background refresh if expired
   - Data automatically serialized between server and client
-  - Results cached and returned from loader
+  - Content refreshed in background when expired content is accessed
 - **Google Search Integration**: 
   - Real-time web search for current stock data
   - Grounding metadata available for accuracy
 - **Prompts**: 
   - Stock article generation with current market data
   - Real-time stock information retrieval
-- **Error Handling**: Return null from loader if API fails and no cache
+- **Error Handling**: Return null from loader if no cache exists
+
+## Content Generation
+- **Implementation**: Background refresh triggered by expired cache access
+- **Integration Point**: Route loaders trigger background jobs
+- **Process**: 
+  1. User visits stock page with expired cache (> 10 minutes old)
+  2. Route loader returns old cached content immediately
+  3. Route loader triggers background refresh job for that specific stock
+  4. Background job calls Gemini API to generate fresh content
+  5. Background job updates cache with new content
+  6. Next visit to the same stock will have fresh content
+- **Cache TTL**: 10 minutes per stock article
+- **User Experience**: Always fast page loads with cached content, fresh content appears on subsequent visits after background refresh completes
 
 ## Environment Variables
 - `GEMINI_API_KEY`: Google Gemini API key
