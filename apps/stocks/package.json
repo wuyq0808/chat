@@ -4,23 +4,30 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nx serve",
-    "build": "nx build",
+    "dev": "react-router dev",
+    "build": "react-router build",
+    "start": "react-router-serve ./build/server/index.js",
     "test": "nx test",
     "lint": "nx lint",
-    "preview": "nx preview"
+    "typecheck": "react-router typegen && tsc"
   },
   "dependencies": {
-    "@skyscanner/backpack-web": "^37.7.1",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "react-router-dom": "^6.29.0"
+    "@google/genai": "^1.5.1",
+    "@react-router/node": "^7.0.2",
+    "@react-router/serve": "^7.0.2",
+    "async-mutex": "^0.5.0",
+    "date-fns": "^4.1.0",
+    "isbot": "^5.1.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-router": "^7.0.2"
   },
   "devDependencies": {
-    "@types/react": "18.3.12",
-    "@types/react-dom": "18.3.1",
-    "@vitejs/plugin-react": "^4.2.0",
-    "sass": "^1.55.0",
+    "@react-router/dev": "^7.0.2",
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.3",
     "vite": "^6.0.0"
   }
 }
