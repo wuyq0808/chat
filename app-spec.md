@@ -94,6 +94,7 @@ apps/
 - typescript: Type checking
 - @google/genai: Gemini API client (v2)
 - react-markdown: Markdown rendering component
+- basic-auth: HTTP basic authentication middleware
 
 ## Scripts
 - `npm run dev`: React Router 7 development server with SSR
@@ -175,8 +176,17 @@ apps/
 - **Integration**: Replaces custom HTML formatting with native Markdown rendering
 - **Benefits**: Better typography, consistent formatting, and easier content management
 
+## Authentication
+- **Basic Auth**: HTTP basic authentication protects the entire site
+- **Implementation**: Node.js basic-auth middleware in entry.server.tsx
+- **Credentials**: Username and password stored in environment variables
+- **Scope**: All routes protected (/, /stock/:symbol, and catch-all)
+- **Response**: 401 Unauthorized with WWW-Authenticate header for invalid credentials
+
 ## Environment Variables
 - `GEMINI_API_KEY`: Google Gemini API key
+- `BASIC_AUTH_USER`: Username for basic authentication
+- `BASIC_AUTH_PASS`: Password for basic authentication
 - Set in .env file at project root
 
 ## Styling
