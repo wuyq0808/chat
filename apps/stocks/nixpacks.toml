@@ -1,7 +1,0 @@
-[phases.install]
-dependsOn = ["setup"]
-cmds = ["npm install --production=false"]
-
-[phases.build]
-dependsOn = ["install"]
-cmds = ["npm run build"]
